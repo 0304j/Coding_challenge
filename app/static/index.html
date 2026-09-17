@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Ticket Booking Tester</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2.5rem; border-bottom: 1px solid #ccc; padding-bottom: .3rem; }
+  table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+  th, td { border: 1px solid #ccc; padding: .4rem .6rem; text-align: left; font-size: .9rem; }
+  form { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-top: .5rem; }
+  input { padding: .3rem; border: 1px solid #aaa; }
+  button { padding: .35rem .8rem; border: 1px solid #333; background: #fff; cursor: pointer; }
+  button:hover { background: #eee; }
+  .msg { margin-top: .5rem; font-size: .85rem; white-space: pre-wrap; }
+  .error { color: #a00; }
+  .ok { color: #060; }
+</style>
+</head>
+<body>
+  <h1>Ticket Booking Tester</h1>
+  <p>Plain HTML page for manually exercising the API. No auth — user/owner actions are separated only by which form you use.</p>
+
+  <h2>Events</h2>
+  <button id="refresh-events">Refresh events</button>
+  <table id="events-table">
+    <thead><tr><th>ID</th><th>Name</th><th>Date</th><th>Available</th><th>Total</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Owner: create event</h2>
+  <form id="create-event-form">
+    <input name="name" placeholder="Event name" required />
+    <input name="event_date" type="date" required />
+    <input name="total_tickets" type="number" min="1" placeholder="Total tickets" required />
+    <button type="submit">Create</button>
+  </form>
+  <div id="create-event-msg" class="msg"></div>
+
+  <h2>Owner: booking count for an event</h2>
+  <form id="count-form">
+    <input name="event_id" type="number" min="1" placeholder="Event ID" required />
+    <button type="submit">Check count</button>
+  </form>
+  <div id="count-msg" class="msg"></div>
+
+  <h2>User: book a ticket</h2>
+  <form id="book-form">
+    <input name="event_id" type="number" min="1" placeholder="Event ID" required />
+    <input name="user_id" placeholder="Your user id" required />
+    <button type="submit">Book</button>
+  </form>
+  <div id="book-msg" class="msg"></div>
+
+  <h2>User: my tickets</h2>
+  <form id="tickets-form">
+    <input name="user_id" placeholder="Your user id" required />
+    <button type="submit">Show my tickets</button>
+  </form>
+  <table id="tickets-table">
+    <thead><tr><th>Ticket ID</th><th>Event ID</th><th>Booked at</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+<script>
+const api = (path, opts) => fetch(path, opts).then(async r => {
+  const body = await r.json().catch(() => null);
+  if (!r.ok) throw new Error((body && body.detail) || r.statusText);
+  return body;
+});
+
+function showMsg(el, text, isError) {
+  el.textContent = text;
+  el.className = 'msg ' + (isError ? 'error' : 'ok');
+}
+
+async function loadEvents() {
+  const events = await api('/events');
+  const tbody = document.querySelector('#events-table tbody');
+  tbody.innerHTML = '';
+  for (const e of events) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${e.id}</td><td>${e.name}</td><td>${e.event_date}</td>
+      <td>${e.available_tickets}</td><td>${e.total_tickets}</td>
+      <td><button data-id="${e.id}" class="delete-btn">Delete</button></td>`;
+    tbody.appendChild(tr);
+  }
+  tbody.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await api(`/events/${btn.dataset.id}`, { method: 'DELETE' });
+      loadEvents();
+    });
+  });
+}
+
+document.getElementById('refresh-events').addEventListener('click', loadEvents);
+
+document.getElementById('create-event-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const msg = document.getElementById('create-event-msg');
+  try {
+    const event = await api('/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: f.get('name'),
+        event_date: f.get('event_date'),
+        total_tickets: Number(f.get('total_tickets')),
+      }),
+    });
+    showMsg(msg, `Created event #${event.id}`, false);
+    ev.target.reset();
+    loadEvents();
+  } catch (e) { showMsg(msg, e.message, true); }
+});
+
+document.getElementById('count-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const msg = document.getElementById('count-msg');
+  try {
+    const res = await api(`/events/${f.get('event_id')}/bookings`);
+    showMsg(msg, `"${res.event_name}": ${res.booked_tickets} ticket(s) booked`, false);
+  } catch (e) { showMsg(msg, e.message, true); }
+});
+
+document.getElementById('book-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const msg = document.getElementById('book-msg');
+  try {
+    const ticket = await api(`/events/${f.get('event_id')}/bookings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: f.get('user_id') }),
+    });
+    showMsg(msg, `Booked ticket #${ticket.id}`, false);
+    loadEvents();
+  } catch (e) { showMsg(msg, e.message, true); }
+});
+
+document.getElementById('tickets-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const tickets = await api(`/users/${f.get('user_id')}/tickets`);
+  const tbody = document.querySelector('#tickets-table tbody');
+  tbody.innerHTML = '';
+  for (const t of tickets) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${t.id}</td><td>${t.event_id}</td><td>${t.booked_at}</td>`;
+    tbody.appendChild(tr);
+  }
+});
+
+loadEvents();
+</script>
+</body>
+</html>
